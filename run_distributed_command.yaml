@@ -1,0 +1,64 @@
+# This workflow demonstrates the use of a generator step which produces a list of items as a result.
+# This list is subsequently used for expanding the next step into multiple parallel steps.
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: run-distributed-command-
+spec:
+  entrypoint: run-distributed-command
+  arguments:
+      parameters:
+          - name: "cmd"
+  volumes:
+  - name: inputvol
+    hostPath:
+      path: /vfvs_input
+      type: Directory
+  templates:
+  - name: run-distributed-command
+    steps:
+    - - name: generate
+        template: gen-job-list
+        arguments:
+          parameters:
+          - name: file_extension
+            value: "{{workflow.parameters.file_extension}}"
+    - - name: run-job
+        template: process-files
+        arguments:
+          parameters:
+          - name: file_name
+            value: "{{item}}"
+          - name: command
+            value: "{{workflow.parameters.cmd}}"
+        withParam: "{{steps.generate.outputs.result}}"
+
+  - name: gen-job-list
+    inputs:
+      parameters:
+      - name: file_extension
+    script:
+      image: python:alpine3.7
+      command: [python3]
+      source: |
+        import glob
+        import json
+        import sys
+        import os
+        files = glob.glob("/mnt/vol/**/*{{inputs.parameters.file_extension}}", recursive=True)
+        json.dump([i for i in files[0:3]], sys.stdout)
+      volumeMounts:
+      - name: inputvol
+        mountPath: /mnt/vol
+  - name: process-files
+    inputs:
+      parameters:
+      - name: file_name
+      - name: command
+    container:
+      image: alpine:latest
+      command: [sh, -c]
+      args: ["echo {{inputs.parameters.command}} {{inputs.parameters.file_name}}"]
+      volumeMounts:
+      - name: inputvol
+        mountPath: /mnt/vol
